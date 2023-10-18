@@ -193,7 +193,7 @@ static int __init _module_init(void)
     */
     ret_val = register_chrdev(_MODULE_MAJOR_NUM, _MODULE_NAME, &fops);
 
-    if (0 == ret_val) { 
+    if (0 == ret_val) {
     	pr_info(_MODULE_NAME_TO_RP "registered with Major: %d, Minor %d:", _MODULE_MAJOR_NUM, 0);
     } else if (ret_val > 0) {
         pr_info(_MODULE_NAME_TO_RP "registered with Major: %d, Minor %d:", 
