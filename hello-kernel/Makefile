@@ -6,7 +6,7 @@ all:
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
 
 insmod:
-	sudo insmod ./$(TARGET).ko major_num=64 hello_str="hello kernel"
+	sudo insmod ./$(TARGET).ko major_num=64 hello_str="Hello"
 
 mknod: insmod
 	sudo mknod /dev/$(TARGET) c 64 0
