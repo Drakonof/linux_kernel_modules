@@ -59,7 +59,6 @@ address space and has the necessary access permissions.
 #define _MODULE_NAME         "hello kernel"
 #define _MODULE_NAME_TO_RP   "hello kernel: "
 
-#define _MODULE_MAJOR_NUM    64U
 #define _MODULE_CLASS        "hello_kernel_class"
 
 
@@ -124,6 +123,23 @@ information about the device, including its file operations and major/minor numb
 static struct cdev module_device;
 
 
+/*
+если параметр доживет то его можно почитать: 
+sudo cat /sys/module/kthreads/parameters/thread_cnt тк S_IRUSR | S_IRGRP | S_IROTH позволяют это.
+__initdata разрешает удаления этой переменной из памяти после ее использования в инициализауции.
+EXAMPLE: static unsigned long __initdata thread_cnt = 0; 
+*/
+static unsigned int major_num = 60;
+static char *hello_str = "Hello Kernel";
+
+module_param(major_num, uint, S_IRUSR | S_IRGRP | S_IROTH);
+module_param(hello_str, charp, S_IRUSR | S_IRGRP | S_IROTH);
+
+// Documents of parameter
+MODULE_PARM_DESC(major_num, "module dev number");
+MODULE_PARM_DESC(hello_str, "hello string");
+
+
 static int module_open(struct inode *p_dev_file, struct file *p_inst)
 {
 	pr_info(_MODULE_NAME_TO_RP "opened\n");
@@ -182,7 +198,7 @@ static int __init _module_init(void)
     const unsigned int c_major_swift = 20, 
                        c_minor_mask = 0xfffff;
 
-	pr_info("Hello kernel\n");
+	pr_info(_MODULE_NAME_TO_RP "%s\n", hello_str);
 
 #if _MODULE_VERTION_OLD == 1 //  separet vertion, should be learned how use it togever
     /*
@@ -191,10 +207,10 @@ static int __init _module_init(void)
     #include <linux/fs.h>
     major num, short device name and fops
     */
-    ret_val = register_chrdev(_MODULE_MAJOR_NUM, _MODULE_NAME, &fops);
+    ret_val = register_chrdev(major_num, _MODULE_NAME, &fops);
 
     if (0 == ret_val) {
-    	pr_info(_MODULE_NAME_TO_RP "registered with Major: %d, Minor %d:", _MODULE_MAJOR_NUM, 0);
+    	pr_info(_MODULE_NAME_TO_RP "registered with Major: %d, Minor %d:", major_num, 0);
     } else if (ret_val > 0) {
         pr_info(_MODULE_NAME_TO_RP "registered with Major: %d, Minor %d:", 
                                     ret_val >> c_major_swift, ret_val&c_minor_mask);
@@ -247,20 +263,21 @@ class_error:
 static void __exit _module_exit(void)
 {
 #if _MODULE_VERTION_OLD == 1 //  separet vertion, should be learned how use it togever
-	unregister_chrdev(_MODULE_MAJOR_NUM, _MODULE_NAME);
+	unregister_chrdev(major_num, _MODULE_NAME);
 #else
     cdev_del(&module_device);
     device_destroy(p_module_class, module_nr);
     class_destroy(p_module_class);
     unregister_chrdev_region(module_nr, 1);
 #endif
-	pr_info("Goodbye kernel");
+	pr_info(_MODULE_NAME_TO_RP "Goodbye kernel\n");
 }
 
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Artem Shimko");
 MODULE_DESCRIPTION("hello kernel LKM");
+MODULE_VERSION("0.01");
 
 
 module_init(_module_init);
