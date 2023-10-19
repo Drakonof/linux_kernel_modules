@@ -5,11 +5,17 @@ obj-m += $(TARGET).o
 all:
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
 
-mknod:
+insmod:
+	sudo insmod ./$(TARGET).ko major_num=64 hello_str="hello kernel"
+
+mknod: insmod
 	sudo mknod /dev/$(TARGET) c 64 0
 	ls -l /dev/$(TARGET)
 
-rmnod:
+rmmod:
+	sudo rmmod $(TARGET)
+
+rmnod: rmmod
 	sudo rm /dev/$(TARGET)
 
 clean:
