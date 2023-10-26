@@ -4,6 +4,7 @@
 #include <linux/cdev.h>
 #include <linux/uaccess.h>
 #include <linux/gpio.h>
+#include <linux/interrupt.h>
 
 #define _MODULE_NAME         "button"
 #define _MODULE_NAME_TO_RP   "button: "
@@ -17,6 +18,16 @@ static struct cdev module_dev;
 static unsigned int pin_nr = 4;
 module_param(pin_nr, uint, S_IRUSR | S_IRGRP | S_IROTH);
 MODULE_PARM_DESC(pin_nr, "pin number");
+
+unsigned int irq_nr;
+
+
+static irq_handler_t gpio_irq_handler(unsigned int irq, void *p_dev_id,
+                                       struct pt_regs *p_regs)
+{
+    pr_info(_MODULE_NAME_TO_RP "the button was pushed\n");
+    return (irq_handler_t) IRQ_HANDLED;
+}
 
 
 static ssize_t module_read(struct file *p_file, char *p_user_buf, size_t count, loff_t *p_offs)
@@ -62,7 +73,7 @@ static int __init _module_init(void)
                        c_minor_mask = 0xfffff;
 
     if (alloc_chrdev_region(&module_nr, 0, 1, _MODULE_NAME) < 0) {
-    	pr_err(_MODULE_NAME_TO_RP "allocation failed\n");
+    	pr_err(_MODULE_NAME_TO_RP "alloc_chrdev_region failed\n");
     	return -1;
     }
 
@@ -70,33 +81,40 @@ static int __init _module_init(void)
                                module_nr >> c_major_swift, module_nr&c_minor_mask);
 
     if (NULL == (p_module_class = class_create(THIS_MODULE, _MODULE_CLASS))) {
-        pr_err(_MODULE_NAME_TO_RP "device class failed\n");
+        pr_err(_MODULE_NAME_TO_RP "class_create failed\n");
         goto class_error;
     }
 
     if (NULL == device_create(p_module_class, NULL, module_nr, NULL, _MODULE_NAME)) {
-    	pr_err(_MODULE_NAME_TO_RP "device file failed\n");
+    	pr_err(_MODULE_NAME_TO_RP "device_create failed\n");
     	goto file_error;
     }
 
     cdev_init(&module_dev, &fops);
 
     if (-1 == cdev_add(&module_dev, module_nr, 1)) {
-    	pr_err(_MODULE_NAME_TO_RP "registering failed\n");
+    	pr_err(_MODULE_NAME_TO_RP "cdev_add failed\n");
     	goto add_error;
     }
 
     if (gpio_request(pin_nr, "led gpio pin") < 0) {
-    	pr_err(_MODULE_NAME_TO_RP "gpio %d allocation failed\n", pin_nr);
+    	pr_err(_MODULE_NAME_TO_RP "gpio_request failed\n");
     	goto add_error;
     }
 
-    if (gpio_direction_output(pin_nr, 0)) {
-    	pr_err(_MODULE_NAME_TO_RP "gpio %d direction failed\n", pin_nr);
+    if (gpio_direction_input(pin_nr)) {
+    	pr_err(_MODULE_NAME_TO_RP "gpio_direction_input failed\n");
     	goto gpio_error;
     }
 
-    pr_info(_MODULE_NAME_TO_RP "init\n");
+    irq_nr = gpio_to_irq(pin_nr);
+    if (0 != request_irq(irq_nr, (irq_handler_t) gpio_irq_handler,
+                         IRQF_TRIGGER_RISING, "button irq", NULL)) {
+        pr_err(_MODULE_NAME_TO_RP "request_irq failed\n");
+        goto gpio_error;
+    }
+
+    pr_info(_MODULE_NAME_TO_RP "inited\n");
 
     return 0;
 
@@ -115,6 +133,7 @@ class_error:
 
 static void __exit _module_exit(void)
 {
+    free_irq(irq_nr, NULL);
 	gpio_set_value(pin_nr, 0);
 	gpio_free(pin_nr);
 	cdev_del(&module_dev);
