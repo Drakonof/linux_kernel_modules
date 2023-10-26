@@ -1,6 +1,7 @@
 obj-m += led.o
 obj-m += button.o
 obj-m += hd44780.o
+obj-m += pwm.o
 
 all:
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
