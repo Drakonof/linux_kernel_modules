@@ -1,6 +1,8 @@
 TARGET := hello-kernel
 
 obj-m += $(TARGET).o
+obj-m += timer.o
+obj-m += hrtimer.o
 
 all:
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
