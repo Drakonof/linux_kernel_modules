@@ -4,6 +4,7 @@ obj-m += $(TARGET).o
 obj-m += timer.o
 obj-m += hrtimer.o
 obj-m += dt_probe.o
+obj-m += ioctl-demo.o
 
 all: dt
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
