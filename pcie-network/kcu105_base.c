@@ -1,3 +1,5 @@
+//todo: msi
+
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/pci.h>
@@ -26,6 +28,20 @@ static struct pci_device_id kcu105_base_ids[] = {
 
 MODULE_DEVICE_TABLE(pci, kcu105_base_ids);
 
+
+// example
+irqreturn_t _irq_handler(int irq, void *p_data)
+{
+    pr_info(_MODULE_NAME_TO_RP "_irq_handler\n");
+
+    /* 
+        some todo depence on board ...
+       like iowrite8 to irq reg ad etc...
+    */
+
+    return IRQ_HANDLED;
+
+}
 
 static int _probe(struct pci_dev *p_dev, const struct pci_device_id *p_id)
 {
@@ -106,12 +122,35 @@ static int _probe(struct pci_dev *p_dev, const struct pci_device_id *p_id)
         return status;
     }
 
+    p_bar0 = devm_kzalloc(&p_dev->dev, sizeof(int), GFP_KERNEL);
+    if (NULL == p_bar0) {
+        pr_err(_MODULE_NAME_TO_RP "devm_kzalloc failed\n");
+        return -ENOMEM;
+    }
+
     if ((p_bar0  = pcim_iomap_table(p_dev)[0]) < 0) {
         pr_err(_MODULE_NAME_TO_RP "pcim_iomap_table failed\n");
         return -1;
     }
 
-    iowrite8(0x4, p_bar0 + GPIO_2_DATA_REG_OFFSET); //ioread32( p_bar0 + GPIO_2_DATA_REG_OFFSET)
+    iowrite8(0x5, p_bar0 + GPIO_2_DATA_REG_OFFSET); //ioread32( p_bar0 + GPIO_2_DATA_REG_OFFSET)
+    
+
+    if (p_dev->irq) {
+        status = devm_request_irq(&p_dev->dev, p_dev->irq, _irq_handler, 0, 
+                                 KBUILD_MODNAME, p_bar0);
+        if (status) {
+            pr_err(_MODULE_NAME_TO_RP "dev_request_irq failed\n");
+            return -1;
+        }
+
+        pr_info(_MODULE_NAME_TO_RP "dev_request_irq: OK\n");
+
+        /* 
+            some todo depence on board ...
+            like iowrite8 to irq reg ad etc...
+        */
+    }
     
 
     return 0;
