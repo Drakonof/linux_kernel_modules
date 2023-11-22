@@ -1,4 +1,5 @@
-//todo: msi
+//todo: msi, ioctl, dma
+
 
 #include <linux/module.h>
 #include <linux/init.h>
@@ -49,6 +50,18 @@ struct pci_device_id {
 };
 
 */
+
+/*
+static struct pci_device_id demo_pci_tbl [] __initdata = {
+
+    {PCI_VENDOR_ID_DEMO, PCI_DEVICE_ID_DEMO,
+
+     PCI_ANY_ID, PCI_ANY_ID, 0, 0, DEMO},
+
+    {0,}
+
+};
+*/
 static struct pci_device_id kcu105_base_ids[] = {
     /*
      * PCI_DEVICE - macro used to describe a specific pci device
@@ -63,6 +76,7 @@ static struct pci_device_id kcu105_base_ids[] = {
         .vendor = (vend), .device = (dev), \
         .subvendor = PCI_ANY_ID, .subdevice = PCI_ANY_ID
     */
+    //full line example: { 0x10ec, 0x8029, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_RealTek_RTL_8029 },
     {PCI_DEVICE(_PCI_VENDER_ID, _PCI_DEVICE_ID)},
     {0,} // end of list
 };
@@ -90,9 +104,37 @@ irqreturn_t _irq_handler(int irq, void *p_data)
 
 //and pci_set_drvdata(pdev, drv_priv);
 
-//
+/*
+static int __init demo_probe(struct pci_dev *pci_dev, const struct pci_device_id *pci_id)
+{
+    struct demo_card *card;
 
-static int _probe(struct pci_dev *p_dev, const struct pci_device_id *p_id)
+    if (pci_enable_device(pci_dev))
+        return -EIO;
+
+    if (pci_set_dma_mask(pci_dev, DEMO_DMA_MASK)) {
+        return -ENODEV;
+    }
+
+    if ((card = kmalloc(sizeof(struct demo_card), GFP_KERNEL)) == NULL) {
+        printk(KERN_ERR “pci_demo: out of memory\n”);
+        return -ENOMEM;
+    }
+
+    memset(card, 0, sizeof(*card));
+    card->iobase = pci_resource_start (pci_dev, 1);
+    card->pci_dev = pci_dev;
+    card->pci_id = pci_id->device;
+    card->irq = pci_dev->irq;
+    card->next = devs;
+    card->magic = DEMO_CARD_MAGIC;
+    pci_set_master(pci_dev);
+    request_region(card->iobase, 64, card_names[pci_id->driver_data]);
+    return 0;
+}
+*/
+
+static int /*__devinit*/ _probe(struct pci_dev *p_dev, const struct pci_device_id *p_id)
 {
     int size = 0, status = 0;
     u16 vid = 0, did = 0;
@@ -141,6 +183,14 @@ static int _probe(struct pci_dev *p_dev, const struct pci_device_id *p_id)
     //     kfree(drv_priv);
     // }
     // release_device(pdev);
+
+
+    // Reserve the I/O region:
+    //request_region(iobase, iosize, “my driver”);
+    //or simpler:
+    //pci_request_region(pdev, bar, “my driver”);
+    //or even simpler (regions for all BARs):
+    //pci_request_regions(pdev, “my driver”);
 
 
 
@@ -309,7 +359,7 @@ static int _probe(struct pci_dev *p_dev, const struct pci_device_id *p_id)
 //     pci_disable_device(pdev);
 // }
 
-static void _remove(struct pci_dev *p_dev)
+static void /*__devexit*/_remove(struct pci_dev *p_dev)
 { 
     pr_info(_MODULE_NAME_TO_RP "remove\n");
 }
@@ -317,6 +367,19 @@ static void _remove(struct pci_dev *p_dev)
 
 //suspend — эта функция вызывается при засыпании устройства
 //resume — эта функция вызывается при пробуждении устройства
+
+/*
+static struct pci_driver ne2k_driver = {
+        .name           = DRV_NAME,
+        .probe          = ne2k_pci_init_one,
+        .remove         = __devexit_p(ne2k_pci_remove_one), //This replaces the function address by NULL if this code is discarded
+        .id_table       = ne2k_pci_tbl,
+#ifdef CONFIG_PM
+        .suspend        = ne2k_pci_suspend,
+        .resume         = ne2k_pci_resume,
+#endif
+};
+*/
 static struct pci_driver kcu105_base_driver = {
     .name = "kcu105_base",
     .id_table = kcu105_base_ids,
@@ -324,7 +387,24 @@ static struct pci_driver kcu105_base_driver = {
     .remove = _remove,
 };
 
+/*
+static int __init demo_init_module (void)
+{
+    //to check whether the PCI bus has been supported by the Linux kernel
+    if (!pci_present())
 
+        return -ENODEV;
+
+    if (!pci_register_driver(&demo_pci_driver)) {
+
+        pci_unregister_driver(&demo_pci_driver);
+
+                return -ENODEV;
+
+    }
+    return 0;
+}
+*/
 static int __init _module_init(void)
 {
     pr_info(_MODULE_NAME_TO_RP "init\n");
