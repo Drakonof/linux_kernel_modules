@@ -24,10 +24,11 @@
 #define GPIO_TRI_OUTPUT        0x0
 #define GPIO_TRI_INPUT         0x1
 
-#define WR_VALUE               _IOW('a', 'a', int32_t *)
-
+#define WR                     _IOW("g", "w", int8_t *)
+#define RD                     _IOR("g", "r", int8_t *)
 
 u8 led_val;
+u8 button_val;
 
 static dev_t dev;
 static struct class *p_module_class;
@@ -73,8 +74,8 @@ static int _probe(struct pci_dev *p_dev, const struct pci_device_id *p_id)
         pr_err(_MODULE_NAME_TO_PR "pcim_iomap_table failed\n");
         return -1;
     }
-
-    iowrite8(led_val, priv.p_hw_mem + GPIO_2_DATA_REG_OFFSET);
+    
+    iowrite8(0xff, priv.p_hw_mem + GPIO_TRI_REG_OFFSET);
 
     return 0;
 }
@@ -109,10 +110,19 @@ static long _ioctl(struct file *p_file, unsigned int cmd, unsigned long arg)
 {
     switch (cmd) {
 
-    case WR_VALUE:
+    case WR:
         if(copy_from_user(&led_val ,(u8 *) arg, sizeof(led_val))) {
             pr_err(_MODULE_NAME_TO_PR "_ioctl -> copy_from_user failed\n");
         }
+        
+        iowrite8(led_val, priv.p_hw_mem + GPIO_2_DATA_REG_OFFSET);
+    break;
+    case RD:
+        if( copy_to_user((int32_t*) arg, &button_val, sizeof(button_val)) ) {
+            pr_err("Data Read : Err!\n");
+        }
+        
+        button_val = ioread8(priv.p_hw_mem + GPIO_DATA_REG_OFFSET);
     break;
 
     default:
