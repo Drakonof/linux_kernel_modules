@@ -6,9 +6,9 @@
 #include <linux/cdev.h>
 
 
-#define _MODULE_NAME           "led"
-#define _MODULE_NAME_TO_PR     "led: "
-#define _MODULE_CLASS          "leds"
+#define _MODULE_NAME           "gpio"
+#define _MODULE_NAME_TO_PR     "gpio: "
+#define _MODULE_CLASS          "gpios"
 
 #define _PCI_VENDER_ID         0x10EE
 #define _PCI_DEVICE_ID         0x8024
@@ -198,7 +198,7 @@ static void __exit _eexit(void)
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Artem Shimko");
-MODULE_DESCRIPTION("led LMK");
+MODULE_DESCRIPTION("gpio LMK");
 MODULE_VERSION("1.01");
 
 
