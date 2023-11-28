@@ -24,8 +24,8 @@
 #define GPIO_TRI_OUTPUT        0x0
 #define GPIO_TRI_INPUT         0x1
 
-#define WR                     _IOW("g", "w", int8_t *)
-#define RD                     _IOR("g", "r", int8_t *)
+#define WR                     _IOW('g', 'w', int8_t *)
+#define RD                     _IOR('g', 'r', int8_t *)
 
 u8 led_val;
 u8 button_val;
