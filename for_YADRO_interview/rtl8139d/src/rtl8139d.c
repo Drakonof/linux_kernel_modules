@@ -50,26 +50,176 @@ typedef struct _module_priv { //great_adapter
     u8 __iomem      *hw_regs;  // memory mapped I/O addr (virtual address) ??
     unsigned long   hw_regs_len;   // length of I/O or MMI/O region
 
-    unsigned int    cur_tx; // ??
-    unsigned int    dirty_tx; // ??
-    unsigned char   *tx_buf[NUM_TX_DESC]; // ??
-    unsigned char   *tx_bufs;        // Tx buffer start address (virtual address). ??
+    unsigned int    cur_tx; // хранит текущий дескриптор передачи
+    unsigned int    dirty_tx; // указывает на первый из дескрипторов передачи, для которых передача еще не завершена
+    unsigned int    tx_flag;
+    unsigned char   *tx_buf[NUM_TX_DESC]; //адреса четырех "дескрипторов передачи"
+    unsigned char   *tx_bufs;
+    dma_addr_t      tx_bufs_dma; // физический адрес однго из четырех "дескрипторов передачи" 
 
-    dma_addr_t      tx_bufs_dma;      // Tx buffer dma address (physical address) ??
-
-    struct net_device_stats stats; // ??
-    unsigned char *rx_ring; // ??
-    dma_addr_t rx_ring_dma; // ??
-    unsigned int cur_rx; // ??
+    struct net_device_stats stats; // ifconfig
+    unsigned char *rx_ring; // адрес памяти в ядре, где запоминаются принятые пакеты
+    dma_addr_t rx_ring_dma; // физический адрес rx_ring памяти
+    unsigned int cur_rx; // используется для отслеживания места, куда будет записываться следующий пакет
 } _module_priv_t;
 
+#define ISR             0x3e
+#define CmdReset   0x10
+#define CR         0x37
+#define CmdTxEnb   0x04
+#define CmdRxEnb   0x08
+#define TCR        0x40
+#define TSAD0      0x20
+#define IMR        0x3c
+
+/* ISR Bits */
+#define RxOK       0x01
+#define RxErr      0x02
+#define TxOK       0x04
+#define TxErr      0x08
+#define RxOverFlow 0x10
+#define RxUnderrun 0x20
+#define RxFIFOOver 0x40
+#define CableLen   0x2000
+#define TimeOut    0x4000
+#define SysErr     0x8000
+#define RCR           0x44
+#define RBSTART  0x30
+#define MPC           0x4c
+#define MULINT    0x5c
+#define TSD0          0x10
+#define ETH_MIN_LEN 60  /* minimum Ethernet frame size */
+#define TxHostOwns    0x2000
+#define TxUnderrun    0x4000
+#define TxStatOK      0x8000
+#define TxOutOfWindow 0x20000000
+#define TxAborted     0x40000000
+#define TxCarrierLost 0x80000000
+#define RxBufEmpty 0x01
+#define CAPR         0x38
+
+#define RX_BUF_LEN_IDX 2         /* 0==8K, 1==16K, 2==32K, 3==64K */
+#define RX_BUF_LEN     (8192 < RX_BUF_LEN_IDX)
+#define RX_BUF_PAD     16           /* see 11th and 12th bit of RCR: 0x44 */
+#define RX_BUF_WRAP_PAD 2048   /* spare padding to handle pkt wrap */
+#define RX_BUF_TOT_LEN  (RX_BUF_LEN + RX_BUF_PAD + RX_BUF_WRAP_PAD)
+
+
+
+#define INT_MASK (RxOK | RxErr | TxOK | TxErr | \
+               RxOverFlow | RxUnderrun | RxFIFOOver | \
+               CableLen | TimeOut | SysErr)
 
 static irqreturn_t _irq_handler(int irq, void *p_dev) 
 {
-   // struct net_device *p_net_device = (struct net_device *)p_dev;
-   //  _module_priv_t *p_module_priv = netdev_priv(p_net_device);
+    struct net_device *p_net_device = (struct net_device *)p_dev;
+    _module_priv_t *p_module_priv = netdev_priv(p_net_device);
 
-    // TODO: read register to see if it is Rx interrupt or Tx interrupt
+    void *ioaddr = p_module_priv->hw_regs;
+
+    unsigned short isr = readw(ioaddr + ISR);
+
+     /* clear all interrupt.
+         * Specs says reading ISR clears all interrupts and writing
+         * has no effect. But this does not seem to be case. I keep on
+         * getting interrupt unless I forcibly clears all interrupt :-(
+         */
+    writew(0xffff, ioaddr + ISR);
+
+    if((isr & TxOK) || (isr & TxErr)) 
+        {
+           while((p_module_priv->dirty_tx != p_module_priv->cur_tx) || netif_queue_stopped(p_net_device))
+           {
+                   unsigned int txstatus = 
+                           readl(ioaddr + TSD0 + p_module_priv->dirty_tx * sizeof(int));
+
+                   if(!(txstatus & (TxStatOK | TxAborted | TxUnderrun)))
+                           break; /* yet not transmitted */
+
+                   if(txstatus & TxStatOK) {
+                           pr_info(_MODULE_NAME_TO_PR "Transmit OK interrupt\n");
+                           p_module_priv->stats.tx_bytes += (txstatus & 0x1fff);
+                           p_module_priv->stats.tx_packets++;
+                   }
+                   else {
+                           pr_info(_MODULE_NAME_TO_PR "Transmit Error interrupt\n");
+                           p_module_priv->stats.tx_errors++;
+                   }
+                           
+                   p_module_priv->dirty_tx++;
+                   p_module_priv->dirty_tx = p_module_priv->dirty_tx % NUM_TX_DESC;
+
+                   if((p_module_priv->dirty_tx == p_module_priv->cur_tx) & netif_queue_stopped(p_net_device))
+                   {
+                           pr_info(_MODULE_NAME_TO_PR "waking up queue\n");
+                           netif_wake_queue(p_net_device);
+                   }
+           }
+    }
+
+    if(isr & RxErr) {
+           /* TODO: Need detailed analysis of error status */
+           pr_info(_MODULE_NAME_TO_PR "receive err interrupt\n");
+           p_module_priv->stats.rx_errors++;
+    }
+
+    if(isr & RxOK) {
+       pr_info(_MODULE_NAME_TO_PR "receive interrupt received\n");
+       while((readb(ioaddr + CR) & RxBufEmpty) == 0)
+       {
+           unsigned int rx_status;
+           unsigned short rx_size;
+           unsigned short pkt_size;
+           struct sk_buff *skb;
+
+           if(p_module_priv->cur_rx > RX_BUF_LEN)
+                   p_module_priv->cur_rx = p_module_priv->cur_rx % 32768;
+
+           /* TODO: need to convert rx_status from little to host endian
+            * XXX: My CPU is little endian only :-)
+            */
+           rx_status = *(unsigned int*)(p_module_priv->rx_ring + p_module_priv->cur_rx);
+           rx_size = rx_status >> 16;
+           
+           /* first two bytes are receive status register 
+            * and next two bytes are frame length
+            */
+           pkt_size = rx_size - 4;
+
+           /* hand over packet to system */
+           skb = dev_alloc_skb (pkt_size + 2);
+           if (skb) {
+                   skb->dev = p_net_device;
+                   skb_reserve (skb, 2); /* 16 byte align the IP fields */
+
+                   memcpy (skb->data, p_module_priv->rx_ring + p_module_priv->cur_rx + 4, pkt_size);
+
+                   skb_put (skb, pkt_size);
+                   skb->protocol = eth_type_trans (skb, p_net_device);
+                   netif_rx (skb);
+
+         //          p_net_device->last_rx = jiffies;
+                   p_module_priv->stats.rx_bytes += pkt_size;
+                   p_module_priv->stats.rx_packets++;
+           } 
+           else {
+                   pr_info(_MODULE_NAME_TO_PR "Memory squeeze, dropping packet.\n");
+                   p_module_priv->stats.rx_dropped++;
+           }
+   
+
+           /* update CAPR */
+           writew(p_module_priv->cur_rx, ioaddr + CAPR);
+       }
+        }
+
+
+    if(isr & CableLen)
+               pr_info(_MODULE_NAME_TO_PR "cable length change interrupt\n");
+        if(isr & TimeOut)
+               pr_info(_MODULE_NAME_TO_PR "time interrupt\n");
+        if(isr & SysErr)
+               pr_info(_MODULE_NAME_TO_PR "system err interrupt\n");
 
     return IRQ_HANDLED;
 }
@@ -86,54 +236,76 @@ static void _init_ring (struct net_device *p_net_device)
     
 
     for (i = 0; i < NUM_TX_DESC; i++) {
-        pr_info(_MODULE_NAME_TO_PR "==================\n");
         p_module_priv->tx_buf[i] = &p_module_priv->tx_bufs[i * TX_BUF_SIZE];
     }
         
     return;
 }
 
-// set tx DMA address. start xmit.
+
+
+//set tx DMA address. start xmit.
 static void _hw_start (struct net_device *p_net_device)
 {
     _module_priv_t *p_module_priv = netdev_priv(p_net_device);
 
-    u32 ctrl_data = 0; // control data write to register
+    void *ioaddr = p_module_priv->hw_regs;
+    u32 i;
 
-    // read control register value
-    //*(u32 *)&ctrl_data = readl(p_module_priv->hw_regs + REG_MASTER_CTRL);
-    // // add soft reset control bit
-    // pr_info(_MODULE_NAME_TO_PR "==================\n");ctrl_data |= 0x10;
+    /* Soft reset the chip. */
+    writeb(CmdReset, ioaddr + CR);
 
-    // /* Soft reset the chip. */
-    //writel(ctrl_data, p_module_priv->hw_regs + REG_MASTER_CTRL);
-    // wait 20ms for reset ready
-    msleep(20);
+    /* Check that the chip has finished the reset. */
+    for (i = 1000; i > 0; i--) {
+           barrier();
+           if ((readb(ioaddr + CR) & CmdReset) == 0)
+                   break;
+           udelay (10);
+    }
 
-    /* TODO: Must enable Tx/Rx before setting transfer thresholds! */
+    /* Must enable Tx before setting transfer thresholds! */
+    writeb(CmdTxEnb | CmdRxEnb, ioaddr + CR);
 
-    /* TODO: tx config */
+    /* tx config */
+    writel(0x00000600, ioaddr + TCR); /* DMA burst size 1024 */
 
-    /* TODO: rx config */
+    /* rx config */
+    writel(((1 < 12) | (7 < 8) | (1 < 7) | 
+                            (1 < 3) | (1 < 2) | (1 < 1)), ioaddr + RCR);
 
-    /* TODO: init Tx buffer DMA addresses */
+    /* init Tx buffer DMA addresses */
+    for (i = 0; i < NUM_TX_DESC; i++) {
+           writel(p_module_priv->tx_bufs_dma + (p_module_priv->tx_buf[i] - p_module_priv->tx_bufs),
+                                  ioaddr + TSAD0 + (i * 4));
+    }
 
-    /* TODO: Enable all known interrupts by setting the interrupt mask. */
+    /* init RBSTART */
+    writel(p_module_priv->rx_ring_dma, ioaddr + RBSTART);
+    /* initialize missed packet counter */
+    writel(0, ioaddr + MPC);
+    /* no early-rx interrupts */
+    writew((readw(ioaddr + MULINT) & 0xF000), ioaddr + MULINT);
 
-    pr_info(_MODULE_NAME_TO_PR "==================\n");netif_start_queue (p_net_device);
+
+    writew(INT_MASK, ioaddr + IMR);
+
+    netif_start_queue (p_net_device);
+
+
     return; //for what?
 }
 
 /* register IRQ, allocate tx buffer, initialize tx ring */
 static int net_open(struct net_device *p_net_device)
 {
+    pr_info(_MODULE_NAME_TO_PR "net_open\n");
     _module_priv_t *p_module_priv = netdev_priv(p_net_device);
 
 
-    // enable MSI, can get IRQ 43 ??
-    p_module_priv->msi_res = pci_enable_msi(p_module_priv->p_pci_dev);
+    // // enable MSI, can get IRQ 43 ??
+    // p_module_priv->msi_res = pci_enable_msi(p_module_priv->p_pci_dev);
 
-    pr_info(_MODULE_NAME_TO_PR "MSI(0 is OK): %d, IRQ: %d\n", p_module_priv->msi_res,  p_module_priv->p_pci_dev->irq);
+    // pr_info(_MODULE_NAME_TO_PR "MSI(0 is OK): %d, IRQ: %d\n", p_module_priv->msi_res,  p_module_priv->p_pci_dev->irq);
 
     /* get the IRQ,  43 is correct, 17 is wrong
      * second arg is interrupt handler
@@ -159,19 +331,21 @@ static int net_open(struct net_device *p_net_device)
         return -ENOMEM;
     }
 
+    p_module_priv->tx_flag = 0;
+
     /* get memory for Rx buffers*/
-    // p_module_priv->rx_ring = pci_alloc_consistent(p_module_priv->p_pci_dev, TOTAL_RX_BUF_SIZE, &p_module_priv->rx_ring_dma);
+    p_module_priv->rx_ring = pci_alloc_consistent(p_module_priv->p_pci_dev, RX_BUF_TOT_LEN, &p_module_priv->rx_ring_dma);
 
-    // if (NULL == p_module_priv->rx_ring) {
-    //     pr_err(_MODULE_NAME_TO_PR "%s rx_ring pci_alloc_consistent failed \n", __func__);
-    //     free_irq(p_module_priv->p_pci_dev->irq, p_net_device); //goto
+    if (NULL == p_module_priv->rx_ring) {
+        pr_err(_MODULE_NAME_TO_PR "%s rx_ring pci_alloc_consistent failed \n", __func__);
+        free_irq(p_module_priv->p_pci_dev->irq, p_net_device); //goto
 
-    //     if(p_module_priv->tx_bufs) {
-    //         pci_free_consistent(p_module_priv->p_pci_dev, TOTAL_TX_BUF_SIZE, p_module_priv->tx_bufs, p_module_priv->tx_bufs_dma);
-    //         p_module_priv->tx_bufs = NULL;
-    //     }
-    //     return -ENOMEM;
-    // }
+        if(p_module_priv->tx_bufs) {
+            pci_free_consistent(p_module_priv->p_pci_dev, TOTAL_TX_BUF_SIZE, p_module_priv->tx_bufs, p_module_priv->tx_bufs_dma);
+            p_module_priv->tx_bufs = NULL;
+        }
+        return -ENOMEM;
+    }
 
     // initialize the tx ring
     _init_ring(p_net_device);
@@ -188,10 +362,14 @@ static int net_close(struct net_device *p_net_device)
     return 0;
 }
 
+
+
 static netdev_tx_t net_start_xmit(struct sk_buff *skb, struct net_device *p_net_device)
 {
-    // _module_priv_t *p_module_priv = netdev_priv(p_net_device);
-    // unsigned int entry = p_module_priv->cur_tx;
+    _module_priv_t *p_module_priv = netdev_priv(p_net_device);
+
+    pr_info(_MODULE_NAME_TO_PR "net_start_xmit\n");
+   // unsigned int entry = p_module_priv->cur_tx;
 
     // skb_copy_and_csum_dev(skb, p_module_priv->tx_buf[entry]);
     // dev_kfree_skb(skb);
@@ -203,26 +381,51 @@ static netdev_tx_t net_start_xmit(struct sk_buff *skb, struct net_device *p_net_
     //     netif_stop_queue(p_net_device);
     // }
 
-    pr_info(_MODULE_NAME_TO_PR "net_start_xmit\n");
+    void *ioaddr = p_module_priv->hw_regs;
+    unsigned int entry = p_module_priv->cur_tx;
+    unsigned int len = skb->len;
+
+    
+
+    if (len < TX_BUF_SIZE) {
+           if(len < ETH_MIN_LEN)
+                   memset(p_module_priv->tx_buf[entry], 0, ETH_MIN_LEN);
+           skb_copy_and_csum_dev(skb, p_module_priv->tx_buf[entry]);
+           dev_kfree_skb(skb);
+    } else {
+           dev_kfree_skb(skb);
+           return 0;
+    }
+
+
+    writel(p_module_priv->tx_flag | max(len, (unsigned int)ETH_MIN_LEN), 
+                       ioaddr + TSD0 + (entry * sizeof (u32)));
+        entry++;
+        p_module_priv->cur_tx = entry % NUM_TX_DESC;
+
+    
  
-    return NETDEV_TX_OK;
+   // return NETDEV_TX_OK;
+    if(p_module_priv->cur_tx == p_module_priv->dirty_tx) {
+           netif_stop_queue(p_net_device);
+    }
+    return 0;
 }
 
-// static struct net_device_stats *net_get_stats(struct net_device *p_net_device)
-// {
-//     _module_priv_t *p_module_priv = netdev_priv(p_net_device);
-
-//     pr_info(_MODULE_NAME_TO_PR "net_get_stats\n");
-//     msleep(1000);
-//     return &(p_module_priv->stats);
-// }
+static struct net_device_stats *net_get_stats(struct net_device *p_net_device)
+{
+    pr_info(_MODULE_NAME_TO_PR "net_get_stats\n");
+    
+    _module_priv_t *p_module_priv = netdev_priv(p_net_device);
+    return &(p_module_priv->stats);
+}
 
 
 static const struct net_device_ops _net_device_ops = {
     .ndo_open       = net_open,
     .ndo_stop       = net_close,
-    .ndo_start_xmit = net_start_xmit
-  //  .ndo_get_stats  = net_get_stats
+    .ndo_start_xmit = net_start_xmit,
+    .ndo_get_stats  = net_get_stats
 };
 
 
@@ -348,6 +551,7 @@ static int /*__devinit*/ pci_probe(struct pci_dev *p_pci_dev, const struct pci_d
 
     for(i = 0; i < 6; i++) {  /* Hardware Address */ //u16
       //  p_net_device->dev_addr[i] =  readb((const volatile void*)(p_net_device->base_addr+i));
+        p_net_device->dev_addr[i] = 0x12;
         p_net_device->broadcast[i] = 0xff;
     }
 
