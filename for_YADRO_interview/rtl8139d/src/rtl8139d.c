@@ -32,23 +32,23 @@ typedef struct _module_priv {
     struct net_device *p_net_device;
     struct pci_dev *p_pci_dev;
 
-    struct net_device_stats _net_device_stats; // ifconfig
+    struct net_device_stats _net_device_stats;
 
     u8 __iomem *iomem;
-    size_t iomem_len; // -
+    size_t iomem_len;
 
-    u32 tx_current_desc; // хранит текущий дескриптор передачи
-    u32 tx_dirty_desc; // указывает на первый из дескрипторов передачи, для которых передача еще не завершена
+    u32 tx_current_desc;
+    u32 tx_dirty_desc;
     u32 tx_flag;
 
-    u8 *tx_desc_buf[TX_BUF_NUM]; //адреса четырех "дескрипторов передачи" ??
-    u8 *tx_desc_bufs_; // ??
+    u8 *tx_desc_buf[TX_BUF_NUM];
+    u8 *tx_desc_bufs_;
 
-    u32 rx_current_desc; // используется для отслеживания места, куда будет записываться следующий пакет
-    u8 *rx_ring_buf; // адрес памяти в ядре, где запоминаются принятые пакеты
+    u32 rx_current_desc;
+    u8 *rx_ring_buf;
 
-    dma_addr_t tx_desc_buf_dma; // физический адрес однго из четырех "дескрипторов передачи" 
-    dma_addr_t rx_ring_buf_dma; // физический адрес rx_ring памяти
+    dma_addr_t tx_desc_buf_dma;
+    dma_addr_t rx_ring_buf_dma;
 } _module_priv_t;
 
 
@@ -67,7 +67,7 @@ static irqreturn_t _irq_handler(int irq, void *p_dev)
     struct net_device *p_net_device = NULL;
     _module_priv_t *p_module_priv = NULL;
 
-    if (NULL == p_dev) {
+    if (IS_ERR(p_dev)) {
         pr_err(_MODULE_NAME_TO_PR "%s p_dev is NULL \n", __func__);
         return IRQ_HANDLED;
     }
@@ -77,11 +77,7 @@ static irqreturn_t _irq_handler(int irq, void *p_dev)
 
     isr = readw(SET_ADDR(p_module_priv->iomem, ISR_REG_OFFSET));
 
-     /* clear all interrupt.
-         * Specs says reading ISR clears all interrupts and writing
-         * has no effect. But this does not seem to be case. I keep on
-         * getting interrupt unless I forcibly clears all interrupt :-(
-         */
+     /* clear all interrupt.*/
     writew(ISR_INTERRUPT_CLN, SET_ADDR(p_module_priv->iomem, ISR_REG_OFFSET));
 
     if ((isr & BIT(ISR_TX_OK_BIT)) || (isr & BIT(ISR_TX_ERR_BIT))) {
@@ -122,7 +118,7 @@ static irqreturn_t _irq_handler(int irq, void *p_dev)
 
     if (0 != (isr & BIT(ISR_RX_OK_BIT))) {
 
-        while(0 == (readb(SET_ADDR(p_module_priv->iomem, CR_REG_OFFSET)) & 
+        while (0 == (readb(SET_ADDR(p_module_priv->iomem, CR_REG_OFFSET)) & 
                BIT(CR_RX_BUF_EMPTY_BIT))) {
            
             struct sk_buff *skb = NULL;
@@ -146,7 +142,7 @@ static irqreturn_t _irq_handler(int irq, void *p_dev)
                 skb->dev = p_net_device;
                 skb_reserve (skb, 2); /* 16 byte align the IP fields */
 
-                memcpy (skb->data, p_module_priv->rx_ring_buf + p_module_priv->rx_current_desc + 4, rx_size);
+                memcpy(skb->data, p_module_priv->rx_ring_buf + p_module_priv->rx_current_desc + 4, rx_size);
 
                 skb_put (skb, rx_size);
                 skb->protocol = eth_type_trans(skb, p_net_device);
@@ -190,7 +186,7 @@ static void _init_ring(struct net_device *p_net_device)
 
     _module_priv_t *p_module_priv = NULL;
 
-    if (NULL == p_net_device) {
+    if (IS_ERR(p_net_device)) {
         pr_err(_MODULE_NAME_TO_PR "%s p_net_device is NULL \n", __func__);
         return;
     }
@@ -220,7 +216,7 @@ static void _hw_start (struct net_device *p_net_device)
 
     _module_priv_t *p_module_priv = NULL;
 
-    if (NULL == p_net_device) {
+    if (IS_ERR(p_net_device)) {
         pr_err(_MODULE_NAME_TO_PR "%s p_net_device is NULL \n", __func__);
         return;
     }
@@ -232,14 +228,12 @@ static void _hw_start (struct net_device *p_net_device)
 
     /* Check that the chip has finished the reset. */
     for (i = 0; i < c_wait_reset_time; i++) {
-        barrier();
-
         if (0 == (readb(SET_ADDR(p_module_priv->iomem, CR_REG_OFFSET)) & BIT(CR_RST_BIT))) {
             reset_complite_flag = true;
             break;
         }
 
-        udelay (c_udelay);
+        udelay(c_udelay);
     }
 
     if (false == reset_complite_flag) {
@@ -284,7 +278,7 @@ static int net_open(struct net_device *p_net_device)
 {
     _module_priv_t *p_module_priv = NULL;
 
-    if (NULL == p_net_device) {
+    if (IS_ERR(p_net_device)) {
         pr_err(_MODULE_NAME_TO_PR "%s p_net_device is NULL \n", __func__);
         return -ENOMEM;
     }
@@ -310,7 +304,7 @@ static int net_open(struct net_device *p_net_device)
      */
     p_module_priv->tx_desc_bufs_ = pci_alloc_consistent(p_module_priv->p_pci_dev, TX_BUF_TOTAL_SIZE, &p_module_priv->tx_desc_buf_dma);
 
-    if (NULL == p_module_priv->tx_desc_bufs_) {
+    if (IS_ERR(p_module_priv->tx_desc_bufs_)) {
         pr_err(_MODULE_NAME_TO_PR "%s tx_desc_bufs_ pci_alloc_consistent failed \n", __func__);
         goto irq_free;
     }
@@ -320,7 +314,7 @@ static int net_open(struct net_device *p_net_device)
     /* get memory for Rx buffers*/
     p_module_priv->rx_ring_buf = pci_alloc_consistent(p_module_priv->p_pci_dev, RX_BUF_TOT_LEN, &p_module_priv->rx_ring_buf_dma);
 
-    if (NULL == p_module_priv->rx_ring_buf) {
+    if (IS_ERR(p_module_priv->rx_ring_buf)) {
         pr_err(_MODULE_NAME_TO_PR "%s rx_ring_buf pci_alloc_consistent failed \n", __func__);
 
         if(p_module_priv->tx_desc_bufs_) {
@@ -360,7 +354,7 @@ static netdev_tx_t net_start_xmit(struct sk_buff *skb, struct net_device *p_net_
 
     _module_priv_t *p_module_priv = NULL;
 
-    if ((NULL == p_net_device) ||  (NULL == skb)) {
+    if ((IS_ERR(p_net_device)) ||  (IS_ERR(skb))) {
         pr_err(_MODULE_NAME_TO_PR "%s p_net_device/skb is NULL \n", __func__);
         return -ENOMEM;
     }
@@ -440,7 +434,7 @@ static int pci_probe(struct pci_dev *p_pci_dev, const struct pci_device_id *ent)
     struct net_device *p_net_device = NULL;
     _module_priv_t *p_module_priv = NULL;
 
-    if ((NULL == p_pci_dev) || (NULL == ent)) {
+    if ((IS_ERR(p_pci_dev)) || (IS_ERR(ent))) {
         pr_err(_MODULE_NAME_TO_PR "%s p_pci_dev/ent is NULL \n", __func__);
 
         return -ENOMEM;
@@ -448,14 +442,6 @@ static int pci_probe(struct pci_dev *p_pci_dev, const struct pci_device_id *ent)
 
     pr_info(_MODULE_NAME_TO_PR "Vender ID: 0x%x, Device ID: 0x%x\n", pci_ids->vendor, pci_ids->device);
 
-    /* enable device (incl. PCI PM wakeup and hotplug setup) 
-    Well, both functions internally call pci_enable_device_flags(). 
-    The difference is that pci_enable_device_mem() variant initializes only Memory-mapped BARs, whereas pci_enable_device() will initialize both Memory-mapped and IO BARs.
-
-     If your PCI device does not have IO spaces (most probably this is indeed the case) you can easily use pci_enable_device_mem().
-
-     "включаем" память устройства
-    */
     if (0 != pci_enable_device_mem(p_pci_dev)) {
         pr_err(_MODULE_NAME_TO_PR "%s pci_enable_device_mem failed \n", __func__);
 
@@ -469,39 +455,20 @@ static int pci_probe(struct pci_dev *p_pci_dev, const struct pci_device_id *ent)
 
     pci_set_master(p_pci_dev);
 
-    /* There are a lot of PCI devices on the PCI bus. How does the kernel know great is an ethernet device?
-     allocate the memory for ethernet device. Alloccate memoryfor net_device plus private p_module_priv memory */
     p_net_device = alloc_etherdev(sizeof(_module_priv_t));
-    if (NULL == p_net_device) {
+    if (IS_ERR(p_net_device)) {
         pr_err(_MODULE_NAME_TO_PR "%s alloc_etherdev failed \n", __func__);
         goto pci_release;
     }
 
 
-    /* set net device's parent device to PCI device.
-
-      Set the sysfs physical device reference for the network logical device
-      if set prior to registration will cause a symlink during initialization.
-
-      Virtual devices (that are present only in the Linux device model) are children of real devices. 
-
-     */
+    /* Set net device's parent device to PCI device */
     SET_NETDEV_DEV(p_net_device, &p_pci_dev->dev);
-
-    /*Устанавливаем данные PCI драйвера и возвращаем ноль.
-      Это сохранение объекта, описывающего карту. Этот указатель также используется в обратных вызовах удаления и управления питанием.
-
-    */
     
-    pci_set_drvdata(p_pci_dev, p_net_device); // модет быть и не нужно
+    pci_set_drvdata(p_pci_dev, p_net_device);
 
-    /* private data pointer point to net device's private data */
     p_module_priv = netdev_priv(p_net_device);
-
-    /* set private data's PCI device to PCI device */
     p_module_priv->p_pci_dev = p_pci_dev;
-
-    /* set private data's net device to net device */
     p_module_priv->p_net_device = p_net_device;
 
     /* get mem map io address */
@@ -522,7 +489,7 @@ static int pci_probe(struct pci_dev *p_pci_dev, const struct pci_device_id *ent)
     p_module_priv->iomem = ioaddr;
     p_module_priv->iomem_len = mmio_len;
 
-    for(i = 0; i < c_size_addr; i++) {  /* Hardware Address */ //u16
+    for(i = 0; i < c_size_addr; i++) {  /* Hardware Address */
         p_net_device->dev_addr[i] =  readb((const volatile void*)(p_net_device->base_addr + i));
         p_net_device->broadcast[i] = c_broadcast;
     }
@@ -560,7 +527,7 @@ static void pci_remove(struct pci_dev *p_pci_dev)
     struct net_device *p_net_device = NULL;
     _module_priv_t *p_module_priv = NULL;
 
-    if (NULL == p_pci_dev) {
+    if (IS_ERR(p_pci_dev)) {
         pr_err(_MODULE_NAME_TO_PR "%s p_pci_dev is NULL \n", __func__);
 
         return;
