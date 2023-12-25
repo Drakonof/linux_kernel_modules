@@ -1,6 +1,8 @@
 #if defined(_RTL8139D_H_) == 0
 #define _RTL8139D_H_
 
+#define DEBUG 0
+
 /* rtl8139d registers offset relatively PCIe BAR1 */
 #define TSD0_REG_OFFSET       0x10U
 #define TSAD0_REG_OFFSET      0x20U
@@ -72,6 +74,5 @@
 #define RX_BUF_PAD            0x10U  // see 11th and 12th bit of RCR: 0x44 ??
 #define RX_BUF_PKT_PAD        0x800U  // spare padding to handle pkt wrap ??
 #define RX_BUF_TOT_LEN        (RX_BUF_SIZE + RX_BUF_PAD + RX_BUF_PKT_PAD)
-
 
 #endif
